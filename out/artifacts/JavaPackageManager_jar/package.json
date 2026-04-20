@@ -1,1 +1,0 @@
-{"name":"untitled-project","version":"1.0.0","scripts":{"start":"java -jar untitled-project.jar"},"dependencies":{"com.google.code.gson:gson":"2.13.1","org.wso2.orbit.org.apache.commons:commons-lang3":"3.20.0.wso2v1"}}
