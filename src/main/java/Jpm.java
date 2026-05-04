@@ -5,316 +5,25 @@ import com.google.gson.JsonObject;
 import utils.Config;
 
 import java.io.*;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.*;
 
+import static maven.maven.*;
+import static display.format.*;
+import static network.SearchMaven.*;
+import static network.http.*;
+import static json.json.*;
 import static utils.Colors.*;
 import static utils.Debug.printDebug;
 
 public class Jpm {
 
-    static class PackageJson {
-        String name;
-        String version;
-        Map<String, String> scripts;
-        Map<String, String> dependencies;
-        Map<String, Map<String, String>> registry;
-    }
+    static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
-    static class MavenArtifact {
-        String groupId;
-        String artifactId;
-        String latestVersion;
-        String description;
-        String url;
-    }
-
-    static final int    CONNECT_TIMEOUT = 15_000;
-    static final int    READ_TIMEOUT    = 30_000;
-    static final int    MAX_RETRIES     = 3;
-    static final Gson   GSON            = new GsonBuilder().setPrettyPrinting().create();
-
-
-
-    static String httpGet(String urlStr) throws IOException {
-        printDebug("GET " + urlStr);
-        IOException lastError = null;
-
-        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            try {
-                HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
-                conn.setRequestMethod("GET");
-                conn.setRequestProperty("Accept", "application/json");
-                conn.setConnectTimeout(CONNECT_TIMEOUT);
-                conn.setReadTimeout(READ_TIMEOUT);
-                conn.setInstanceFollowRedirects(true);
-
-                int status = conn.getResponseCode();
-                printDebug("HTTP " + status + " (attempt " + attempt + ")");
-                if (status != 200) throw new IOException("HTTP " + status);
-
-                try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
-                    StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = br.readLine()) != null) sb.append(line);
-                    printDebug("Response: " + sb.length() + " chars");
-                    return sb.toString();
-                }
-            } catch (IOException e) {
-                lastError = e;
-                printDebug("Attempt " + attempt + " failed: " + e.getMessage());
-                if (attempt < MAX_RETRIES) {
-                    System.out.println("  " + DIM + "Attempt " + attempt + "/" + MAX_RETRIES + " failed, retrying..." + RESET);
-                    try { Thread.sleep(1500L * attempt); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-                }
-            }
-        }
-        throw lastError;
-    }
-
-    static void downloadWithProgress(String urlStr, File dest) throws IOException {
-        printDebug("Downloading: " + urlStr);
-        IOException lastError = null;
-
-        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            try {
-                HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
-                conn.setConnectTimeout(CONNECT_TIMEOUT);
-                conn.setReadTimeout(READ_TIMEOUT);
-
-                int status = conn.getResponseCode();
-                if (status != 200) throw new IOException("HTTP " + status);
-
-                long total    = conn.getContentLengthLong();
-                long received = 0;
-                long start    = System.currentTimeMillis();
-                byte[] buf    = new byte[8192];
-
-                printDebug("Content-Length: " + total + " bytes");
-
-                try (InputStream  in  = conn.getInputStream();
-                     OutputStream out = new FileOutputStream(dest)) {
-
-                    int read;
-                    while ((read = in.read(buf)) != -1) {
-                        out.write(buf, 0, read);
-                        received += read;
-                        printProgress(dest.getName(), received, total, start);
-                    }
-                }
-
-                System.out.println();
-                printDebug("Download complete: " + dest.getAbsolutePath());
-                return;
-
-            } catch (IOException e) {
-                lastError = e;
-                System.out.println();
-                printDebug("Attempt " + attempt + " failed: " + e.getMessage());
-                if (attempt < MAX_RETRIES) {
-                    System.out.println("  " + DIM + "Attempt " + attempt + "/" + MAX_RETRIES + " failed, retrying..." + RESET);
-                    try { Thread.sleep(1500L * attempt); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-                }
-            }
-        }
-        throw lastError;
-    }
-
-    static void printProgress(String filename, long received, long total, long startMs) {
-        int    BAR_WIDTH = 28;
-        long   elapsed   = Math.max(System.currentTimeMillis() - startMs, 1);
-        double speed     = (double) received / elapsed * 1000.0;
-        String speedStr  = formatBytes((long) speed) + "/s";
-
-        String prefix    = CYAN + BOLD + filename + RESET + "  ";
-
-        if (total <= 0) {
-            String bar = "[" + DIM + "?" + RESET + "]";
-            System.out.printf("\r  %s%s  %s  %s",
-                    prefix, bar, formatBytes(received), DIM + speedStr + RESET);
-            return;
-        }
-
-        double pct      = (double) received / total;
-        int    filled   = (int) (pct * BAR_WIDTH);
-        long   etaSec   = speed > 0 ? (long) ((total - received) / speed) : 0;
-        String etaStr   = etaSec > 0 ? "ETA " + formatTime(etaSec) : "done";
-
-        StringBuilder bar = new StringBuilder("[");
-        for (int i = 0; i < BAR_WIDTH; i++) {
-            if      (i < filled)         bar.append(GREEN + "█" + RESET);
-            else if (i == filled)        bar.append(YELLOW + "▓" + RESET);
-            else                         bar.append(DIM + "░" + RESET);
-        }
-        bar.append("]");
-
-        System.out.printf("\r  %s%s  %s%3d%%%s  %s  %s",
-                prefix,
-                bar,
-                BOLD, (int)(pct * 100), RESET,
-                DIM + formatBytes(received) + "/" + formatBytes(total) + RESET,
-                DIM + speedStr + "  " + etaStr + RESET);
-    }
-
-    static String formatBytes(long bytes) {
-        if (bytes < 1024)        return bytes + " B";
-        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
-        return String.format("%.2f MB", bytes / (1024.0 * 1024));
-    }
-
-    static String formatTime(long seconds) {
-        if (seconds < 60)  return seconds + "s";
-        if (seconds < 3600) return (seconds / 60) + "m" + (seconds % 60) + "s";
-        return (seconds / 3600) + "h" + ((seconds % 3600) / 60) + "m";
-    }
-
-    static MavenArtifact searchMavenCentral(String query) throws IOException {
-        System.out.println("  " + DIM + "Trying search.maven.org..." + RESET);
-        try {
-            MavenArtifact art = searchViaLegacyApi(query);
-            if (art != null) return art;
-        } catch (IOException e) {
-            System.out.println("  " + DIM + "Fallback to central.sonatype.com..." + RESET);
-        }
-        return searchViaSonatypeApi(query);
-    }
-
-    static MavenArtifact searchViaLegacyApi(String query) throws IOException {
-        String encoded = query.replace(" ", "+");
-        String body    = httpGet("https://search.maven.org/solrsearch/select?q=a:" + encoded + "&rows=5&wt=json");
-        JsonArray docs = GSON.fromJson(body, JsonObject.class)
-                .getAsJsonObject("response").getAsJsonArray("docs");
-
-        if (docs == null || docs.size() == 0) return null;
-
-        for (int i = 0; i < docs.size(); i++) {
-            JsonObject doc = docs.get(i).getAsJsonObject();
-            if (doc.get("a").getAsString().equals(query)) {
-                return artifactFromLegacyDoc(doc);
-            }
-        }
-        return artifactFromLegacyDoc(docs.get(0).getAsJsonObject());
-    }
-
-    static MavenArtifact artifactFromLegacyDoc(JsonObject doc) {
-        MavenArtifact art = new MavenArtifact();
-        art.groupId       = doc.get("g").getAsString();
-        art.artifactId    = doc.get("a").getAsString();
-        art.latestVersion = doc.get("latestVersion").getAsString();
-        printDebug("Artifact: " + art.groupId + ":" + art.artifactId + ":" + art.latestVersion);
-        return art;
-    }
-
-    static MavenArtifact searchViaSonatypeApi(String query) throws IOException {
-        String encoded  = query.replace(" ", "+");
-        String body     = httpGet("https://central.sonatype.com/api/v1/search?q=" + encoded + "&name=" + encoded + "&size=5");
-        JsonArray comps = GSON.fromJson(body, JsonObject.class).getAsJsonArray("components");
-
-        if (comps == null || comps.size() == 0) return null;
-
-        for (int i = 0; i < comps.size(); i++) {
-            JsonObject comp = comps.get(i).getAsJsonObject();
-            if (comp.get("name").getAsString().equals(query)) return artifactFromSonatypeComp(comp);
-        }
-        return artifactFromSonatypeComp(comps.get(0).getAsJsonObject());
-    }
-
-    static MavenArtifact artifactFromSonatypeComp(JsonObject comp) {
-        MavenArtifact art = new MavenArtifact();
-        art.groupId       = comp.get("namespace").getAsString();
-        art.artifactId    = comp.get("name").getAsString();
-        art.latestVersion = comp.get("version").getAsString();
-        return art;
-    }
-
-    static int compareVersions(String a, String b) {
-        String[] pa = a.split("\\.");
-        String[] pb = b.split("\\.");
-        int len = Math.max(pa.length, pb.length);
-        for (int i = 0; i < len; i++) {
-            int na = i < pa.length ? parseVersionPart(pa[i]) : 0;
-            int nb = i < pb.length ? parseVersionPart(pb[i]) : 0;
-            if (na != nb) return na - nb;
-        }
-        return 0;
-    }
-
-    static int parseVersionPart(String part) {
-        try { return Integer.parseInt(part.replaceAll("[^0-9].*", "")); }
-        catch (NumberFormatException e) { return 0; }
-    }
-
-    static void resolveDep(String name, String version, Map<String, Map<String, String>> registry,
-                           Map<String, String> resolved, Set<String> visiting) {
-        if (visiting.contains(name)) {
-            System.out.println(YELLOW + "Warning: circular dependency on " + name + ", skipping." + RESET);
-            return;
-        }
-        if (resolved.containsKey(name)) {
-            String existing = resolved.get(name);
-            if (existing.equals(version)) return;
-            System.out.println(YELLOW + "Conflict: " + name + " (" + existing + " vs " + version + ")" + RESET);
-            if (compareVersions(version, existing) > 0) {
-                printDebug("Upgrading " + name + ": " + existing + " → " + version);
-                resolved.put(name, version);
-            }
-            return;
-        }
-        resolved.put(name, version);
-        visiting.add(name);
-        if (registry != null && registry.containsKey(name))
-            for (Map.Entry<String, String> dep : registry.get(name).entrySet())
-                resolveDep(dep.getKey(), dep.getValue(), registry, resolved, visiting);
-        visiting.remove(name);
-    }
 
     static String[] buildCommand(String command) {
         if (System.getProperty("os.name", "").toLowerCase().contains("win"))
             return new String[]{"cmd.exe", "/c", command};
         return new String[]{"/bin/sh", "-c", command};
-    }
-
-    static String groupIdToPath(String groupId) { return groupId.replace('.', '/'); }
-
-    static String findGroupId(Map<String, String> deps, String artifactId) {
-        if (deps == null) return null;
-        for (String key : deps.keySet()) {
-            String[] p = key.split(":");
-            if (p.length == 2 && p[1].equals(artifactId)) return p[0];
-        }
-        return null;
-    }
-
-    static File ensureLibsDir() {
-        File dir = new File("libs");
-        if (!dir.exists() && !dir.mkdir()) throw new RuntimeException("Could not create libs/");
-        return dir;
-    }
-
-    static void downloadJar(MavenArtifact art, File libsDir) throws IOException {
-        String urlStr = "https://repo1.maven.org/maven2/"
-                + groupIdToPath(art.groupId) + "/"
-                + art.artifactId + "/"
-                + art.latestVersion + "/"
-                + art.artifactId + "-" + art.latestVersion + ".jar";
-
-        printDebug("URL: " + urlStr);
-        File dest = new File(libsDir, art.artifactId + "-" + art.latestVersion + ".jar");
-        downloadWithProgress(urlStr, dest);
-    }
-
-    static PackageJson readPackageJson() throws IOException {
-        File file = new File("package.json");
-        if (!file.exists()) throw new FileNotFoundException("package.json not found.");
-        try (FileReader r = new FileReader(file)) { return GSON.fromJson(r, PackageJson.class); }
-    }
-
-    static void writePackageJson(PackageJson pkg) throws IOException {
-        try (FileWriter w = new FileWriter("package.json")) { GSON.toJson(pkg, w); }
-        printDebug("package.json written");
     }
 
     static void printHelp() {
@@ -376,7 +85,7 @@ public class Jpm {
             }
 
             case "init": {
-                File existing = new File("package.json");
+                File existing = new File("../package.json");
                 if (existing.exists()) {
                     System.out.println(YELLOW + "package.json already exists." + RESET);
                     return;
@@ -633,7 +342,7 @@ public class Jpm {
                 System.out.println();
                 boolean allGood = true;
 
-                File pkgFile = new File("package.json");
+                File pkgFile = new File("../package.json");
                 if (!pkgFile.exists()) {
                     System.out.println(RED + "  ✗ package.json not found" + RESET);
                     allGood = false;
@@ -797,7 +506,7 @@ public class Jpm {
                         System.out.println(GREEN + BOLD + "✓ Installed" + RESET + "  "
                                 + art.artifactId + "-" + art.latestVersion + ".jar  →  libs/");
 
-                        File pkgFile = new File("package.json");
+                        File pkgFile = new File("../package.json");
                         if (pkgFile.exists()) {
                             PackageJson pkg = readPackageJson();
                             if (pkg.dependencies == null) pkg.dependencies = new LinkedHashMap<>();
