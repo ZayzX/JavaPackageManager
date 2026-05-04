@@ -33,7 +33,10 @@ public class SearchMaven {
 
     static MavenArtifact searchViaLegacyApi(String query) throws IOException {
         String encoded = query.replace(" ", "+");
-        String body    = httpGet("https://search.maven.org/solrsearch/select?q=a:" + encoded + "&rows=5&wt=json");
+        String url     = "https://search.maven.org/solrsearch/select?q=a:" + encoded + "&rows=5&wt=json";
+        String body    = httpGet(url);
+        if (body == null) throw new IOException("Empty response from " + url);
+
         JsonArray docs = GSON.fromJson(body, JsonObject.class)
                 .getAsJsonObject("response").getAsJsonArray("docs");
 
@@ -41,14 +44,18 @@ public class SearchMaven {
 
         for (int i = 0; i < docs.size(); i++) {
             JsonObject doc = docs.get(i).getAsJsonObject();
-            if (doc.get("a").getAsString().equals(query)) {
-                return artifactFromLegacyDoc(doc);
-            }
+            MavenArtifact art = artifactFromLegacyDoc(doc);
+            if (art == null) continue;
+            if (art.artifactId.equals(query)) return art;
         }
         return artifactFromLegacyDoc(docs.get(0).getAsJsonObject());
     }
 
     static MavenArtifact artifactFromLegacyDoc(JsonObject doc) {
+        if (!doc.has("g") || !doc.has("a") || !doc.has("latestVersion")) {
+            printDebug("Skipping incomplete doc: " + doc);
+            return null;
+        }
         MavenArtifact art = new MavenArtifact();
         art.groupId       = doc.get("g").getAsString();
         art.artifactId    = doc.get("a").getAsString();
@@ -58,20 +65,29 @@ public class SearchMaven {
     }
 
     static MavenArtifact searchViaSonatypeApi(String query) throws IOException {
-        String encoded  = query.replace(" ", "+");
-        String body     = httpGet("https://central.sonatype.com/api/v1/search?q=" + encoded + "&name=" + encoded + "&size=5");
+        String encoded = query.replace(" ", "+");
+        String url     = "https://central.sonatype.com/api/v1/search?q=" + encoded + "&name=" + encoded + "&size=5";
+        String body    = httpGet(url);
+        if (body == null) throw new IOException("Empty response from " + url);
+
         JsonArray comps = GSON.fromJson(body, JsonObject.class).getAsJsonArray("components");
 
         if (comps == null || comps.size() == 0) return null;
 
         for (int i = 0; i < comps.size(); i++) {
             JsonObject comp = comps.get(i).getAsJsonObject();
-            if (comp.get("name").getAsString().equals(query)) return artifactFromSonatypeComp(comp);
+            MavenArtifact art = artifactFromSonatypeComp(comp);
+            if (art == null) continue;
+            if (art.artifactId.equals(query)) return art;
         }
         return artifactFromSonatypeComp(comps.get(0).getAsJsonObject());
     }
 
     static MavenArtifact artifactFromSonatypeComp(JsonObject comp) {
+        if (!comp.has("namespace") || !comp.has("name") || !comp.has("version")) {
+            printDebug("Skipping incomplete component: " + comp);
+            return null;
+        }
         MavenArtifact art = new MavenArtifact();
         art.groupId       = comp.get("namespace").getAsString();
         art.artifactId    = comp.get("name").getAsString();
@@ -131,9 +147,10 @@ public class SearchMaven {
         return null;
     }
 
-    public static File ensureLibsDir() {
+    public static File ensureLibsDir() throws IOException {
         File dir = new File("libs");
-        if (!dir.exists() && !dir.mkdir()) throw new RuntimeException("Could not create libs/");
+        if (!dir.exists() && !dir.mkdir())
+            throw new IOException("Could not create libs/");
         return dir;
     }
 

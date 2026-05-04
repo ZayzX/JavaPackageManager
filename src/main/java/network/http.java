@@ -17,11 +17,13 @@ import utils.Config;
 public class http {
 
     public static String httpGet(String urlStr) throws IOException {
-        try {
-            Gson gson = new Gson();
-            FileReader reader = new FileReader("config.json");
+        Gson gson = new Gson();
+        try (FileReader reader = new FileReader("config.json")) {   
             Config config = gson.fromJson(reader, Config.class);
-            reader.close();
+
+            if (config.maxRetries <= 0) {
+                throw new IOException("maxRetries must be > 0, got: " + config.maxRetries);
+            }
 
             printDebug("GET " + urlStr);
             IOException lastError = null;
@@ -55,12 +57,8 @@ public class http {
                     }
                 }
             }
-            throw lastError;
-        
 
-        } catch (IOException e) {
-            e.printStackTrace();
-        }  
-        return null;
+            throw lastError; 
+        }
     }
 }
