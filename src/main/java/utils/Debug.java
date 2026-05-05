@@ -15,7 +15,7 @@ public class Debug {
     public static void printDebug(String msg) {
         try {
 
-            FileReader reader = new FileReader("config.json");
+            FileReader reader = new FileReader("wrapper/config.json");
             Config config = gson.fromJson(reader, Config.class);
             reader.close();
 

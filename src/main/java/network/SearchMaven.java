@@ -40,7 +40,7 @@ public class SearchMaven {
         JsonArray docs = GSON.fromJson(body, JsonObject.class)
                 .getAsJsonObject("response").getAsJsonArray("docs");
 
-        if (docs == null || docs.size() == 0) return null;
+        if (docs == null || docs.isEmpty()) return null;
 
         for (int i = 0; i < docs.size(); i++) {
             JsonObject doc = docs.get(i).getAsJsonObject();
@@ -72,7 +72,7 @@ public class SearchMaven {
 
         JsonArray comps = GSON.fromJson(body, JsonObject.class).getAsJsonArray("components");
 
-        if (comps == null || comps.size() == 0) return null;
+        if (comps == null || comps.isEmpty()) return null;
 
         for (int i = 0; i < comps.size(); i++) {
             JsonObject comp = comps.get(i).getAsJsonObject();

@@ -18,7 +18,7 @@ public class http {
 
     public static String httpGet(String urlStr) throws IOException {
         Gson gson = new Gson();
-        try (FileReader reader = new FileReader("config.json")) {   
+        try (FileReader reader = new FileReader("wrapper/config.json")) {   
             Config config = gson.fromJson(reader, Config.class);
 
             if (config.maxRetries <= 0) {

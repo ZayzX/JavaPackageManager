@@ -2,12 +2,14 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+
+import json.json.PackageJson;
+import maven.maven.MavenArtifact;
 import utils.Config;
 
 import java.io.*;
 import java.util.*;
 
-import static maven.maven.*;
 import static display.format.*;
 import static network.SearchMaven.*;
 import static network.http.*;
@@ -65,7 +67,7 @@ public class Jpm {
 
             case "debug": {
                 try {
-                    File file = new File("config.json");
+                    File file = new File("wrapper/config.json");
                     Config config;
                     if (!file.exists()) {
                         config = new Config();
@@ -85,25 +87,55 @@ public class Jpm {
             }
 
             case "init": {
-                File existing = new File("../package.json");
+                File existing = new File("package.json");
                 if (existing.exists()) {
                     System.out.println(YELLOW + "package.json already exists." + RESET);
                     return;
                 }
-                Map<String, Object> data = new LinkedHashMap<>();
-                data.put("name",         "untitled-project");
-                data.put("version",      "1.0.0");
-                data.put("main",         "Main");
-                data.put("scripts",      Map.of("start", "java -jar untitled-project.jar"));
-                data.put("dependencies", new LinkedHashMap<>());
-                try (FileWriter w = new FileWriter("package.json")) {
-                    GSON.toJson(data, w);
-                    printDebug("package.json written");
-                    System.out.println(GREEN + "✓" + RESET + " Initialized project → package.json");
-                } catch (IOException e) {
-                    System.err.println(RED + "Error: " + e.getMessage() + RESET);
+
+                if (args.length > 1) {
+                    if (args[1].equals("-y")) {
+                        Map<String, Object> data = new LinkedHashMap<>();
+                        data.put("name",         "untitled-project");
+                        data.put("version",      "1.0.0");
+                        data.put("main",         "Main");
+                        data.put("scripts",      Map.of("start", "java -jar untitled-project.jar"));
+                        data.put("dependencies", new LinkedHashMap<>());
+                        try (FileWriter w = new FileWriter("package.json")) {
+                            GSON.toJson(data, w);
+                            printDebug("package.json written");
+                            System.out.println(GREEN + "✓" + RESET + " Initialized project → package.json");
+                        } catch (IOException e) {
+                            System.err.println(RED + "Error: " + e.getMessage() + RESET);
+                        }
+                        break;
+                    }
+                } else {
+                    Scanner scanner = new Scanner(System.in);
+                    System.out.println("What is the project's name ?");
+                    String projectName = scanner.nextLine();
+                    System.out.println("What is the project's version ?");
+                    String projectVersion = scanner.nextLine();
+                    System.out.println("What is the project's main class ?");
+                    String projectMainClass = scanner.nextLine();
+                    
+                    Map<String, Object> data = new LinkedHashMap<>();
+                    data.put("name",         projectName);
+                    data.put("version",      projectVersion);
+                    data.put("main",         projectMainClass);
+                    data.put("scripts",      Map.of("start", "java -jar " + projectName + ".jar"));
+                    data.put("dependencies", new LinkedHashMap<>());
+                    try (FileWriter w = new FileWriter("package.json")) {
+                        GSON.toJson(data, w);
+                        printDebug("package.json written");
+                        System.out.println(GREEN + "✓" + RESET + " Initialized project → package.json");
+                    } catch (IOException e) {
+                        System.err.println(RED + "Error: " + e.getMessage() + RESET);
+                    }
+                    scanner.close();
+                    break;
                 }
-                break;
+                
             }
 
             case "run": {
@@ -139,7 +171,7 @@ public class Jpm {
                     JsonArray docs = GSON.fromJson(body, JsonObject.class)
                             .getAsJsonObject("response").getAsJsonArray("docs");
 
-                    if (docs == null || docs.size() == 0) {
+                    if (docs == null || docs.isEmpty()) {
                         System.out.println("No results found.");
                         return;
                     }
@@ -172,7 +204,7 @@ public class Jpm {
                     JsonArray docs = GSON.fromJson(body, JsonObject.class)
                             .getAsJsonObject("response").getAsJsonArray("docs");
 
-                    if (docs == null || docs.size() == 0) { System.out.println("Not found."); return; }
+                    if (docs == null || docs.isEmpty()) { System.out.println("Not found."); return; }
 
                     JsonObject doc = docs.get(0).getAsJsonObject();
                     String groupId    = doc.get("g").getAsString();
@@ -342,7 +374,7 @@ public class Jpm {
                 System.out.println();
                 boolean allGood = true;
 
-                File pkgFile = new File("../package.json");
+                File pkgFile = new File("package.json");
                 if (!pkgFile.exists()) {
                     System.out.println(RED + "  ✗ package.json not found" + RESET);
                     allGood = false;
@@ -506,7 +538,7 @@ public class Jpm {
                         System.out.println(GREEN + BOLD + "✓ Installed" + RESET + "  "
                                 + art.artifactId + "-" + art.latestVersion + ".jar  →  libs/");
 
-                        File pkgFile = new File("../package.json");
+                        File pkgFile = new File("package.json");
                         if (pkgFile.exists()) {
                             PackageJson pkg = readPackageJson();
                             if (pkg.dependencies == null) pkg.dependencies = new LinkedHashMap<>();

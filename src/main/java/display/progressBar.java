@@ -18,7 +18,7 @@ public class progressBar {
     static {
         try {
             Gson gson = new Gson();
-            FileReader reader = new FileReader("config.json");
+            FileReader reader = new FileReader("wrapper/config.json");
             config = gson.fromJson(reader, Config.class);
             reader.close();
         } catch (IOException e) {

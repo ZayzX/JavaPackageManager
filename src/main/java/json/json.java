@@ -25,13 +25,13 @@ public class json {
     }
 
     public static PackageJson readPackageJson() throws IOException {
-        File file = new File("../package.json");
+        File file = new File("package.json");
         if (!file.exists()) throw new FileNotFoundException("package.json not found.");
         try (FileReader r = new FileReader(file)) { return GSON.fromJson(r, PackageJson.class); }
     }
 
     public static void writePackageJson(PackageJson pkg) throws IOException {
-        try (FileWriter w = new FileWriter("../package.json")) { GSON.toJson(pkg, w); }
+        try (FileWriter w = new FileWriter("package.json")) { GSON.toJson(pkg, w); }
         printDebug("package.json written");
     }
 
